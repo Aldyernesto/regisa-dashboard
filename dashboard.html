@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Regisa.id</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8f8f8;
+            padding-top: 80px; /* Padding for fixed header */
+        }
+        .bg-regisa-blue {
+            background-color: #1a2b5b;
+        }
+        .text-regisa-gold {
+            color: #d4af37;
+        }
+        header {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 1000;
+            transition: all 0.3s ease-in-out;
+        }
+        header.scrolled {
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #1a2b5b;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .hidden {
+            display: none !important;
+        }
+    </style>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import {
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword,
+            signOut,
+            // GoogleAuthProvider, signInWithPopup, PhoneAuthProvider, signInWithPhoneNumber, RecaptchaVerifier, signInWithCredential
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // Mengimpor getDoc untuk mengambil satu dokumen
+        import { getFirestore, collection, getDocs, query, orderBy, addDoc, setDoc, doc, where, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- PENTING: KONFIGURASI FIREBASE ANDA ---
+        // Variabel global __app_id, __firebase_config, dan __initial_auth_token
+        // hanya tersedia di lingkungan Canvas.
+        // Untuk menjalankan di luar Canvas (misalnya, sebagai file HTML lokal),
+        // Anda HARUS mengganti nilai placeholder di bawah dengan konfigurasi Firebase Anda yang sebenarnya.
+        // Anda bisa mendapatkan ini dari Firebase Console: Project settings -> Your apps -> Web (</>) -> Firebase SDK snippet -> Config
+        const defaultFirebaseConfig = {
+            apiKey: "AIzaSyC9w28T8LREUyiPpWuwyluKNjI7bfPV2ho",
+            authDomain: "regisaid-dashboard.firebaseapp.com",
+            projectId: "regisaid-dashboard",
+            storageBucket: "regisaid-dashboard.firebasestorage.app",
+            messagingSenderId: "1090795298516",
+            appId: "1:1090795298516:web:bcbb987b1a09235646a541",
+            measurementId: "G-S4FF582RYJ"
+        };
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : firebaseConfig.projectId;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- AKHIR KONFIGURASI FIREBASE ANDA ---
+
+        // Inisialisasi Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Debugging: Log konfigurasi Firebase
+        console.log("Firebase Config yang Digunakan:", firebaseConfig);
+        console.log("App ID yang Digunakan:", appId);
+        console.log("Origin aplikasi:", window.location.origin);
+
+
+        let recaptchaVerifier; // Tidak digunakan lagi, tetapi tetap dideklarasikan jika ada sisa kode yang merujuk
+        let confirmationResult; // Tidak digunakan lagi, tetapi tetap dideklarasikan jika ada sisa kode yang merujuk
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const loginSection = document.getElementById('loginSection');
+            const dashboardContent = document.getElementById('dashboardContent');
+            const authStatusElement = document.getElementById('authStatus');
+            const userIdDisplayElement = document.getElementById('userIdDisplay');
+            const messageBox = document.getElementById('messageBox');
+            const messageText = document.getElementById('messageText');
+            const closeMessageButton = document.getElementById('closeMessage');
+
+            // Form elements
+            const loginInput = document.getElementById('loginInput'); // Input gabungan untuk username/email
+            const passwordInput = document.getElementById('password');
+            const loginButton = document.getElementById('loginButton');
+            const signupButton = document.getElementById('signupButton'); // Tombol daftar
+            const signupForm = document.getElementById('signupForm'); // Formulir pendaftaran terpisah
+            const usernameSignupInput = document.getElementById('usernameSignup');
+            const emailSignupInput = document.getElementById('emailSignup');
+            const passwordSignupInput = document.getElementById('passwordSignup');
+            const submitSignupButton = document.getElementById('submitSignupButton');
+            const backToLoginButton = document.getElementById('backToLoginButton');
+            const logoutButton = document.getElementById('logoutButton');
+
+            // Dashboard elements
+            const visitorCountElement = document.getElementById('visitorCount');
+            const visitorListElement = document.getElementById('visitorList');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+
+            // Fungsi untuk menampilkan pesan
+            function showMessage(msg, type = 'info', duration = 5000) {
+                messageText.textContent = msg;
+                messageBox.className = `fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg z-50 ${type === 'error' ? 'bg-red-500' : 'bg-blue-500'} text-white`;
+                messageBox.classList.remove('hidden');
+                clearTimeout(messageBox.hideTimeout);
+                messageBox.hideTimeout = setTimeout(() => {
+                    messageBox.classList.add('hidden');
+                }, duration);
+            }
+
+            closeMessageButton.addEventListener('click', () => {
+                messageBox.classList.add('hidden');
+                clearTimeout(messageBox.hideTimeout);
+            });
+
+            // Listener status autentikasi
+            onAuthStateChanged(auth, async (user) => {
+                if (user && !user.isAnonymous) {
+                    loginSection.classList.add('hidden');
+                    signupForm.classList.add('hidden'); // Sembunyikan juga form daftar
+                    dashboardContent.classList.remove('hidden');
+                    logoutButton.classList.remove('hidden');
+                    authStatusElement.textContent = `Status Autentikasi: Berhasil (${user.uid})`;
+                    // Jika Anda ingin menampilkan username setelah login, ambil dari Firestore:
+                    const userDocRef = doc(db, 'users', user.uid);
+                    console.log("Mencoba mengambil dokumen pengguna dari Firestore:", userDocRef.path); // Log jalur Firestore
+                    const userDocSnap = await getDoc(userDocRef); // Menggunakan getDoc untuk satu dokumen
+                    let displayName = user.email; // Default ke email
+                    if (userDocSnap.exists()) { // Menggunakan .exists() untuk DocumentSnapshot
+                        displayName = userDocSnap.data().username || user.email;
+                    }
+                    userIdDisplayElement.textContent = `Selamat datang, ${displayName}! User ID: ${user.uid}`;
+
+                    await fetchVisitorData(user.uid);
+                    await recordVisitor(user.uid);
+                } else {
+                    loginSection.classList.remove('hidden');
+                    signupForm.classList.add('hidden'); // Pastikan form daftar tersembunyi saat awal atau logout
+                    dashboardContent.classList.add('hidden');
+                    logoutButton.classList.add('hidden');
+                    authStatusElement.textContent = `Status Autentikasi: Belum Login`;
+                    userIdDisplayElement.textContent = `User ID Anda: Tidak Tersedia`;
+                }
+            });
+
+            // Initial custom token sign-in (untuk lingkungan Canvas)
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                }
+            } catch (error) {
+                console.error("Error during initial Firebase setup:", error);
+                showMessage(`Error setup awal Firebase: ${error.message}`, 'error', 10000);
+            }
+
+            // --- Event Listeners untuk Login dan Daftar ---
+
+            // Tampilkan formulir pendaftaran saat tombol "Daftar" diklik
+            signupButton.addEventListener('click', () => {
+                loginSection.classList.add('hidden');
+                signupForm.classList.remove('hidden');
+                showMessage('Silakan isi detail pendaftaran Anda.', 'info', 3000);
+            });
+
+            // Kembali ke formulir login dari daftar
+            backToLoginButton.addEventListener('click', () => {
+                signupForm.classList.add('hidden');
+                loginSection.classList.remove('hidden');
+                showMessage('Kembali ke halaman login.', 'info', 3000);
+            });
+
+            // Submit pendaftaran
+            submitSignupButton.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const username = usernameSignupInput.value.trim();
+                const email = emailSignupInput.value.trim();
+                const password = passwordSignupInput.value.trim();
+
+                if (!username || !email || !password) {
+                    showMessage('Semua bidang (Username, Email, Kata Sandi) harus diisi.', 'error');
+                    return;
+                }
+                if (password.length < 6) {
+                    showMessage('Kata sandi harus minimal 6 karakter.', 'error');
+                    return;
+                }
+
+                try {
+                    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                    const user = userCredential.user;
+
+                    // Simpan username ke Firestore
+                    const userDocRef = doc(db, 'users', user.uid);
+                    console.log("Mencoba menyimpan data pengguna ke Firestore:", userDocRef.path); // Log jalur Firestore
+                    await setDoc(userDocRef, {
+                        username: username,
+                        email: email,
+                        createdAt: serverTimestamp()
+                    });
+
+                    showMessage('Pendaftaran berhasil! Anda sekarang dapat login.', 'success', 7000);
+                    // Setelah daftar, kembali ke halaman login atau langsung login (onAuthStateChanged akan menangani)
+                    signupForm.classList.add('hidden');
+                    loginSection.classList.remove('hidden');
+                    usernameSignupInput.value = '';
+                    emailSignupInput.value = '';
+                    passwordSignupInput.value = '';
+
+                } catch (error) {
+                    console.error('Error daftar:', error);
+                    let errorMessage = 'Gagal mendaftar. Silakan coba lagi.';
+                    if (error.code === 'auth/email-already-in-use') {
+                        errorMessage = 'Email ini sudah terdaftar. Silakan login atau gunakan email lain.';
+                    } else if (error.code === 'auth/weak-password') {
+                        errorMessage = 'Kata sandi terlalu lemah. Minimal 6 karakter.';
+                    } else if (error.code === 'auth/invalid-email') {
+                        errorMessage = 'Format email tidak valid.';
+                    } else if (error.code === 'auth/operation-not-allowed') {
+                        errorMessage = 'Pendaftaran Email/Kata Sandi tidak diaktifkan di Firebase Console Anda.';
+                    } else if (error.code === 'permission-denied') {
+                        errorMessage = 'Izin Firestore ditolak. Periksa aturan keamanan Firestore Anda untuk koleksi "users".';
+                    }
+                    showMessage(errorMessage, 'error', 7000);
+                }
+            });
+
+            // Submit login
+            loginButton.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const loginId = loginInput.value.trim(); // Bisa username atau email
+                const password = passwordInput.value.trim();
+
+                if (!loginId || !password) {
+                    showMessage('Username/Email dan kata sandi harus diisi.', 'error');
+                    return;
+                }
+
+                let emailToLogin = loginId;
+
+                // Cek apakah input adalah email atau username
+                const isEmail = loginId.includes('@');
+
+                if (!isEmail) {
+                    // Jika bukan email, anggap sebagai username dan cari emailnya di Firestore
+                    try {
+                        const usersRef = collection(db, 'users');
+                        const q = query(usersRef, where('username', '==', loginId));
+                        console.log("Mencoba mencari username di Firestore:", usersRef.path, "dengan query:", loginId); // Log jalur Firestore
+                        const querySnapshot = await getDocs(q);
+
+                        if (querySnapshot.empty) {
+                            showMessage('Username tidak ditemukan.', 'error', 7000);
+                            return;
+                        }
+
+                        // Asumsi username unik, ambil email dari dokumen pertama
+                        emailToLogin = querySnapshot.docs[0].data().email;
+                        if (!emailToLogin) {
+                            showMessage('Gagal mendapatkan email untuk username ini. Coba login dengan email.', 'error', 7000);
+                            return;
+                        }
+                    } catch (firestoreError) {
+                        console.error('Error mencari username di Firestore:', firestoreError);
+                        let errorMessage = 'Terjadi kesalahan saat mencari username.';
+                        if (firestoreError.code === 'permission-denied') {
+                            errorMessage = 'Izin Firestore ditolak. Periksa aturan keamanan Firestore Anda untuk koleksi "users".';
+                        }
+                        showMessage(errorMessage, 'error', 7000);
+                        return;
+                    }
+                }
+
+                // Lanjutkan dengan login menggunakan email yang ditemukan atau yang dimasukkan
+                try {
+                    await signInWithEmailAndPassword(auth, emailToLogin, password);
+                    showMessage('Login berhasil!', 'success');
+                    loginInput.value = '';
+                    passwordInput.value = '';
+                } catch (error) {
+                    console.error('Error login:', error);
+                    let errorMessage = 'Gagal login. Periksa kredensial Anda.';
+                    if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found') {
+                        errorMessage = 'Username/Email atau kata sandi salah.';
+                    } else if (error.code === 'auth/invalid-email') {
+                         errorMessage = 'Format email tidak valid. Pastikan Anda menggunakan email yang benar atau username yang terdaftar.';
+                    } else if (error.code === 'auth/operation-not-allowed') {
+                        errorMessage = 'Login Email/Kata Sandi tidak diaktifkan di Firebase Console Anda.';
+                    }
+                    showMessage(errorMessage, 'error', 7000);
+                }
+            });
+
+            logoutButton.addEventListener('click', async () => {
+                try {
+                    await signOut(auth);
+                    showMessage('Berhasil keluar.');
+                } catch (error) {
+                    console.error('Error keluar:', error);
+                    showMessage(`Gagal keluar: ${error.message}`, 'error');
+                }
+            });
+
+            // Ambil dan tampilkan data pengunjung
+            async function fetchVisitorData(userId) {
+                loadingIndicator.classList.remove('hidden');
+                try {
+                    const visitorsCollectionRef = collection(db, `artifacts/${appId}/public/data/visitors`);
+                    console.log("Mencoba mengambil data pengunjung dari Firestore:", visitorsCollectionRef.path); // Log jalur Firestore
+                    const querySnapshot = await getDocs(visitorsCollectionRef);
+
+                    let visitorCount = 0;
+                    visitorListElement.innerHTML = '';
+                    if (querySnapshot.empty) {
+                        visitorListElement.innerHTML = '<li class="text-gray-500">Belum ada data kunjungan.</li>';
+                    } else {
+                        querySnapshot.forEach((doc) => {
+                            visitorCount++;
+                            const data = doc.data();
+                            const listItem = document.createElement('li');
+                            listItem.className = 'bg-gray-100 p-3 rounded-md mb-2';
+                            const timestamp = data.timestamp && data.timestamp.toDate ? data.timestamp.toDate() : new Date();
+                            listItem.textContent = `Pengunjung ID: ${data.userId} | Waktu: ${timestamp.toLocaleString()} | Halaman: ${data.page}`;
+                            visitorListElement.appendChild(listItem);
+                        });
+                    }
+                    visitorCountElement.textContent = visitorCount;
+                } catch (error) {
+                    console.error("Error mengambil data pengunjung:", error);
+                    let errorMessage = 'Gagal memuat data pengunjung.';
+                    if (error.code === 'permission-denied') {
+                        errorMessage = 'Izin Firestore ditolak. Periksa aturan keamanan Firestore Anda untuk koleksi "visitors".';
+                    }
+                    showMessage(errorMessage, 'error', 7000);
+                    visitorCountElement.textContent = 'Error';
+                    visitorListElement.innerHTML = '<li class="text-red-500">Gagal memuat data pengunjung.</li>';
+                } finally {
+                    loadingIndicator.classList.add('hidden');
+                }
+            }
+
+            // Rekam data pengunjung
+            async function recordVisitor(userId) {
+                try {
+                    const visitorsCollectionRef = collection(db, `artifacts/${appId}/public/data/visitors`);
+                    console.log("Mencoba merekam data pengunjung ke Firestore:", visitorsCollectionRef.path); // Log jalur Firestore
+                    await addDoc(visitorsCollectionRef, {
+                        userId: userId,
+                        timestamp: serverTimestamp(),
+                        page: 'dashboard',
+                    });
+                    console.log("Data pengunjung direkam untuk user:", userId);
+                } catch (error) {
+                    console.error("Error merekam data pengunjung:", error);
+                    let errorMessage = 'Gagal merekam data pengunjung.';
+                    if (error.code === 'permission-denied') {
+                        errorMessage = 'Izin Firestore ditolak. Periksa aturan keamanan Firestore Anda untuk koleksi "visitors".';
+                    }
+                    showMessage(errorMessage, 'error', 7000);
+                }
+            }
+
+            // Animasi scroll Navbar
+            window.addEventListener('scroll', () => {
+                const header = document.querySelector('header');
+                if (window.scrollY > 50) {
+                    header.classList.add('scrolled');
+                } else {
+                    header.classList.remove('scrolled');
+                }
+            });
+        });
+    </script>
+</head>
+<body class="antialiased">
+    <header class="bg-regisa-blue shadow-sm py-4 px-6 md:px-8">
+        <div class="container mx-auto flex justify-center items-center"> <a href="index.html" class="flex items-center">
+                <img src="https://i.ibb.co/1JQFvGWT/Logo-Regisa-Transparan-v2-5x-100.png" alt="Logo Regisa.id" class="h-10 mr-2">
+            </a>
+            <nav class="ml-auto"> <button id="logoutButton" class="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md transition duration-300 hidden">Keluar</button>
+            </nav>
+        </div>
+    </header>
+
+    <div id="messageBox" class="hidden fixed top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg z-50">
+        <span id="messageText"></span>
+        <button id="closeMessage" class="ml-4 text-white font-bold">&times;</button>
+    </div>
+
+    <main class="container mx-auto px-4 py-12 md:py-16">
+        <section id="loginSection" class="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-purple-500 to-pink-600 text-white p-4 -mt-20">
+            <div class="bg-white text-gray-800 p-8 rounded-xl shadow-2xl max-w-lg w-full">
+                <h2 class="text-3xl font-bold mb-6 text-center text-purple-700">
+                    Login Admin
+                </h2>
+
+                <div class="space-y-6">
+                    <form id="emailAuthForm" class="space-y-4">
+                        <div>
+                            <label for="loginInput" class="block text-sm font-medium text-gray-700 mb-1">Username / Email:</label>
+                            <input
+                                type="text"
+                                id="loginInput"
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500"
+                                placeholder="username atau email@example.com"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Kata Sandi:</label>
+                            <input
+                                type="password"
+                                id="password"
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500"
+                                placeholder="minimal 6 karakter"
+                                required
+                            />
+                        </div>
+                        <button
+                            type="button"
+                            id="loginButton"
+                            class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-75"
+                        >
+                            Login
+                        </button>
+                    </form>
+
+                    <button
+                        type="button"
+                        id="signupButton"
+                        class="w-full text-sm text-purple-600 hover:underline mt-4"
+                    >
+                        Belum punya akun? Daftar
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <section id="signupForm" class="hidden flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-green-500 to-teal-600 text-white p-4 -mt-20">
+            <div class="bg-white text-gray-800 p-8 rounded-xl shadow-2xl max-w-lg w-full">
+                <h2 class="text-3xl font-bold mb-6 text-center text-green-700">
+                    Daftar Akun Admin Baru
+                </h2>
+                <div class="space-y-4">
+                    <div>
+                        <label for="usernameSignup" class="block text-sm font-medium text-gray-700 mb-1">Username:</label>
+                        <input
+                            type="text"
+                            id="usernameSignup"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                            placeholder="nama pengguna Anda"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label for="emailSignup" class="block text-sm font-medium text-gray-700 mb-1">Email:</label>
+                        <input
+                            type="email"
+                            id="emailSignup"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                            placeholder="email@example.com"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label for="passwordSignup" class="block text-sm font-medium text-gray-700 mb-1">Kata Sandi:</label>
+                        <input
+                            type="password"
+                            id="passwordSignup"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                            placeholder="minimal 6 karakter"
+                            required
+                        />
+                    </div>
+                    <button
+                        type="button"
+                        id="submitSignupButton"
+                        class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75"
+                    >
+                        Daftar Sekarang
+                    </button>
+                    <button
+                        type="button"
+                        id="backToLoginButton"
+                        class="w-full text-sm text-green-600 hover:underline mt-2"
+                    >
+                        Sudah punya akun? Login
+                    </button>
+                </div>
+            </div>
+        </section>
+
+
+        <section id="dashboardContent" class="hidden">
+            <section class="text-center mb-10">
+                <h1 class="text-4xl md:text-5xl font-extrabold text-gray-900 mb-4">Dashboard Regisa.id</h1>
+                <p class="text-lg text-gray-600">Ringkasan data pengunjung website Anda.</p>
+            </section>
+
+            <section class="bg-white rounded-xl shadow-lg p-8 mb-8">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Statistik Pengunjung</h2>
+                <p id="authStatus" class="text-sm text-gray-500 mb-2">Status Autentikasi: Memuat...</p>
+                <p id="userIdDisplay" class="text-sm text-gray-500 mb-4">User ID Anda: Memuat...</p>
+
+                <div class="flex items-center justify-center space-x-4">
+                    <p class="text-xl text-gray-700">Total Pengunjung:</p>
+                    <span id="visitorCount" class="text-5xl font-extrabold text-regisa-blue">Memuat...</span>
+                    <div id="loadingIndicator" class="loading-spinner hidden"></div>
+                </div>
+            </section>
+
+            <section class="bg-white rounded-xl shadow-lg p-8">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Detail Kunjungan Terbaru</h2>
+                <ul id="visitorList" class="space-y-2">
+                    <li class="text-gray-500">Memuat data kunjungan...</li>
+                </ul>
+                <p class="text-sm text-gray-500 mt-4">
+                    *Data ini direkam secara anonim. Untuk analisis lebih mendalam (misalnya, per bulan atau grafik), diperlukan implementasi charting library dan logika data yang lebih kompleks.
+                </p>
+            </section>
+        </section>
+    </main>
+
+    <footer class="bg-gray-800 text-white py-8 mt-12">
+        <div class="container mx-auto text-center">
+            <p>&copy; 2025 Regisa.id. Hak Cipta Dilindungi.</p>
+            <p class="text-sm text-gray-400 mt-2">
+                Untuk pertanyaan lebih lanjut, hubungi kami melalui WhatsApp.
+            </p>
+        </div>
+    </footer>
+</body>
+</html>
